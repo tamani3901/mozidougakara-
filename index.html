@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>カラーASCIIアート動画プレイヤー（縦横比自動調整）</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: black;
+      color: white;
+      font-family: monospace;
+      overflow: hidden;
+      height: 100%;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    #controls {
+      padding: 10px;
+      text-align: center;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+    }
+    #settings {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      z-index: 10;
+    }
+    #settings label, #settings input {
+      color: white;
+      font-size: 12px;
+    }
+    #settings input {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: white;
+      padding: 2px;
+    }
+    #ascii-container {
+      display: inline-block;
+      overflow: hidden;
+      text-align: center;
+      max-width: 100%;
+      max-height: 100%;
+      margin-top: auto;
+      position: relative;
+    }
+    /* #ascii を div に変更し、中身を span で構成 */
+    #ascii {
+      white-space: pre;
+      margin: 0;
+      padding: 0;
+      font-family: monospace;
+      line-height: 1em;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform-origin: center center;
+      /* pre から div に変更したので、フォントサイズ調整がより重要に */
+      display: block; 
+    }
+    /* カラー化のために、文字を格納する span をインラインブロックに */
+    #ascii span {
+        display: inline-block;
+    }
+    #video {
+      display: none;
+    }
+    button {
+      margin: 0 5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <input type="file" id="upload" accept="video/*" />
+    <button id="playBtn" disabled>再生／一時停止</button>
+    <button id="restartBtn" disabled>最初から再生</button>
+  </div>
+  <div id="settings">
+    <label>横幅(文字数): <input type="number" id="colsInput" value="100" min="20" max="300"></label>
+    <label>縦横比補正: <input type="number" id="ratioInput" value="0.55" step="0.01" min="0.1" max="1.0" disabled></label>
+    <label>倍率: <input type="number" id="zoomInput" value="1.00" step="0.01" min="0.1" max="3.0"></label>
+  </div>
+
+  <div id="ascii-container">
+    <div id="ascii">ここにASCIIアートが表示されるよ</div>
+  </div>
+
+  <video id="video"></video>
+  <canvas id="canvas" style="display:none;"></canvas>
+
+  <script>
+    const chars = " .-+=$%8&WM#@";
+    // pre から div に変更
+    const asciiEl = document.getElementById("ascii");
+    const asciiContainer = document.getElementById("ascii-container");
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const upload = document.getElementById("upload");
+    const playBtn = document.getElementById("playBtn");
+    const restartBtn = document.getElementById("restartBtn");
+    const colsInput = document.getElementById("colsInput");
+    const ratioInput = document.getElementById("ratioInput");
+    const zoomInput = document.getElementById("zoomInput");
+
+    const settingsPanel = document.getElementById("settings");
+    const controlsPanel = document.getElementById("controls");
+
+    let animationId = null;
+    let fontWidthToHeightRatio = 0.55;
+
+    function getFontRatio() {
+      const span = document.createElement("span");
+      span.textContent = "A";
+      span.style.visibility = "hidden";
+      span.style.fontFamily = "monospace";
+      span.style.fontSize = "1em";
+      span.style.lineHeight = "1em";
+      document.body.appendChild(span);
+      const ratio = span.offsetWidth / span.offsetHeight;
+      document.body.removeChild(span);
+      return ratio;
+    }
+
+    function drawAscii() {
+      if (video.paused || video.ended) {
+        cancelAnimationFrame(animationId);
+        playBtn.textContent = "再生／一時停止";
+        return;
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+      const width = canvas.width;
+      const height = canvas.height;
+
+      let html = "";
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 4;
+          const r = frame[i];
+          const g = frame[i + 1];
+          const b = frame[i + 2];
+          
+          // 明るさに基づいて文字を選ぶ (元のロジックを維持)
+          const avg = (r + g + b) / 3;
+          const idx = Math.min(chars.length - 1, Math.floor(avg / 256 * chars.length));
+          const char = chars[idx] || " ";
+          
+          // RGB値を使って色付きの span タグを作成
+          // **ポイント: 各文字を span で囲み、色を適用**
+          html += `<span style="color:rgb(${r},${g},${b})">${char}</span>`;
+        }
+        // 行の終わりには改行ではなく <br> を使用 (div要素なので)
+        html += "<br>"; 
+      }
+
+      asciiEl.innerHTML = html; // innerHTMLでHTML要素として挿入
+      animationId = requestAnimationFrame(drawAscii);
+    }
+
+    function updateCanvasSize() {
+      if (!video.videoWidth || !video.videoHeight) return;
+
+      const zoom = parseFloat(zoomInput.value);
+      const cols = parseInt(colsInput.value, 10);
+      const videoRatio = video.videoWidth / video.videoHeight;
+      const charRatio = fontWidthToHeightRatio;
+
+      // 行数自動計算
+      const rows = Math.floor(cols / videoRatio * charRatio);
+
+      // 解像度の制限
+      const maxCols = 300;
+      const finalCols = Math.min(cols, maxCols);
+      const finalRows = Math.floor(finalCols / videoRatio * charRatio);
+
+      canvas.width = finalCols;
+      canvas.height = finalRows;
+
+      const screenWidth = window.innerWidth;
+      const screenHeight = window.innerHeight;
+      const toolbarHeight = Math.max(settingsPanel.offsetHeight, controlsPanel.offsetHeight) + 30; // 余裕を持たせる
+      const availableHeight = screenHeight - toolbarHeight;
+
+      // 画面に収まるようにフォントサイズを計算
+      // (1文字の幅) = screenWidth / (cols * zoom)
+      // (1文字の高さ) = availableHeight / (rows * zoom)
+      const fontSize = Math.min(
+        screenWidth / finalCols / zoom,
+        availableHeight / finalRows / zoom
+      );
+      
+      // 縦横比を考慮して、高さの計算を調整（ここでは line-height を fontSize と同じにしてあるため）
+      const adjustedFontSize = Math.min(
+          screenWidth / finalCols,
+          availableHeight / finalRows
+      );
+
+      asciiEl.style.fontSize = `${adjustedFontSize}px`;
+      asciiEl.style.lineHeight = `${adjustedFontSize}px`;
+      
+      // zoom は transform: scale で実現
+      asciiEl.style.transform = `translate(-50%, -50%) scale(${zoom})`;
+
+      // コンテナサイズを更新（文字数 x 調整後のフォントサイズ）
+      asciiContainer.style.width = `${finalCols * adjustedFontSize}px`;
+      asciiContainer.style.height = `${finalRows * adjustedFontSize}px`;
+    }
+
+    // イベントリスナーは変更なし (upload, playBtn, restartBtn, ended, loadedmetadata, input, resize, DOMContentLoaded)
+    // 割愛しますが、元のコードの通りでOKです。
+
+    upload.addEventListener("change", (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      video.src = URL.createObjectURL(file);
+      video.load();
+      playBtn.disabled = false;
+      restartBtn.disabled = false;
+      playBtn.textContent = "再生／一時停止";
+    });
+
+    playBtn.addEventListener("click", () => {
+      if (video.paused) {
+        video.play();
+        playBtn.textContent = "一時停止";
+        drawAscii();
+      } else {
+        video.pause();
+        playBtn.textContent = "再生／一時停止";
+      }
+    });
+
+    restartBtn.addEventListener("click", () => {
+      video.currentTime = 0;
+      video.play();
+      playBtn.textContent = "一時停止";
+      drawAscii();
+    });
+
+    video.addEventListener("ended", () => {
+      playBtn.textContent = "再生／一時停止";
+      cancelAnimationFrame(animationId);
+    });
+
+    video.addEventListener("loadedmetadata", () => {
+      fontWidthToHeightRatio = getFontRatio();
+      ratioInput.value = fontWidthToHeightRatio.toFixed(2);
+      updateCanvasSize();
+    });
+
+    colsInput.addEventListener("input", updateCanvasSize);
+    zoomInput.addEventListener("input", updateCanvasSize);
+
+    window.addEventListener("resize", () => {
+      if (video.readyState >= 1) updateCanvasSize();
+    });
+
+    window.addEventListener("DOMContentLoaded", () => {
+      updateCanvasSize();
+    });
+  </script>
+</body>
+</html>
